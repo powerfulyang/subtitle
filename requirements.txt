@@ -1,0 +1,11 @@
+fastapi
+pydantic
+uvicorn
+faster-whisper
+hf_xet
+python-multipart
+email-validator
+# PyTorch安装说明：
+# GPU版本 (推荐): pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# CPU版本: pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# 请根据您的硬件配置选择合适的版本，详见README.md
