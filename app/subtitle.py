@@ -26,7 +26,7 @@ def get_device() -> str:
         logger.info("CUDA is not available, using CPU for inference.")
     return device
 
-model_size_or_path = "large-v3"
+model_size_or_path = "large-v2"
 
 model_instance = None
 
