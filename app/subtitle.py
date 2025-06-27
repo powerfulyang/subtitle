@@ -160,6 +160,8 @@ def generate_srt(audio_path: str, enable_alignment: bool = True) -> str:
         batch_size = 16 if device == "cuda" else 4
         result = model.transcribe(audio, batch_size=batch_size)
 
+        logger.info(f"基础转录完成: {result}")
+
         logger.info(f"检测到语言 '{result['language']}' (基础转录完成)")
 
         # 阶段2: 词级时间戳对齐（可选，默认启用）
@@ -191,9 +193,7 @@ def generate_srt(audio_path: str, enable_alignment: bool = True) -> str:
 
         return {
             "srt_content": srt_content,
-            "language": result["language"],
-            "segments": result["segments"],
-            "words": result["words"],
+            "segments": result["segments"]
         }
 
     except Exception as e:

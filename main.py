@@ -170,9 +170,7 @@ async def cleanup_temp_files():
 
 class GenerateSubtitleResponse(BaseModel):
     srt_content: str
-    language: str
     segments: list
-    words: list
 
 
 # ——— API 端点 ———
@@ -224,9 +222,7 @@ async def generate_subtitle_endpoint(
 
         return GenerateSubtitleResponse(
             srt_content=result["srt_content"],
-            language=result["language"],
             segments=result["segments"],
-            words=result["words"],
         )
 
     except HTTPException:
