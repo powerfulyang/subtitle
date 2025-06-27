@@ -77,10 +77,10 @@ pip3 install torch torchvision torchaudio --index-url https://download.pytorch.o
 
 **注意**: CPU版本的处理速度明显慢于GPU版本，建议用于测试或轻量使用场景。
 
-### 4. 安装faster-whisper
+### 4. 安装 audio-separator 用于分离人声和背景音乐
 
 ```bash
-pip install faster-whisper
+pip install audio-separator
 ```
 
 ### 5. 验证安装

@@ -1,6 +1,8 @@
 __pycache__
 .idea
-1.txt
-1.mp3
-1.mp4
+*.txt
+*.mp3
+*.mp4
+*.aac
+*.wav
 temp

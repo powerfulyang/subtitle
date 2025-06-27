@@ -170,6 +170,9 @@ async def cleanup_temp_files():
 
 class GenerateSubtitleResponse(BaseModel):
     srt_content: str
+    language: str
+    segments: list
+    words: list
 
 
 # ——— API 端点 ———
@@ -210,16 +213,21 @@ async def generate_subtitle_endpoint(
 
         # 调用核心逻辑生成SRT内容
         api_logger.info(f"🔄 开始生成字幕: {file.filename}")
-        srt_content = generate_srt(temp_file_path)
+        result = generate_srt(temp_file_path)
 
-        if not srt_content or not srt_content.strip():
+        if not result["srt_content"] or not result["srt_content"].strip():
             api_logger.warning(f"⚠️ 生成的字幕内容为空: {file.filename}")
             raise HTTPException(status_code=422, detail="未能从音频文件中识别出任何文本内容")
 
         # 记录成功信息
         api_logger.info(f"✅ 字幕生成成功: {file.filename}")
 
-        return GenerateSubtitleResponse(srt_content=srt_content)
+        return GenerateSubtitleResponse(
+            srt_content=result["srt_content"],
+            language=result["language"],
+            segments=result["segments"],
+            words=result["words"],
+        )
 
     except HTTPException:
         # 重新抛出HTTP异常，不记录日志（避免重复）

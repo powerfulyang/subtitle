@@ -1,10 +1,10 @@
 fastapi
 pydantic
 uvicorn
-faster-whisper
 hf_xet
 python-multipart
 email-validator
+whisperx
 # PyTorch安装说明：
 # GPU版本 (推荐): pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 # CPU版本: pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
