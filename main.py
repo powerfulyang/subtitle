@@ -6,12 +6,13 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import List, Dict, Any, Optional
     
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile, Query
 from pydantic import BaseModel
 
 from app.logger_config import get_logger
-from app.subtitle import generate_srt
+from app.subtitle import generate_srt, generate_detailed_transcription
 
 # ——— 获取应用日志器 ———
 logger = get_logger(__name__)
@@ -98,8 +99,8 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     lifespan=lifespan,
     title="SRT Subtitle Generation API",
-    description="一个通过上传音频或视频文件来自动生成SRT字幕的API。",
-    version="1.0.0",
+    description="一个通过上传音频或视频文件来自动生成SRT字幕的API，支持传统SRT格式和包含词级时间戳的详细数据。",
+    version="2.0.0",
     contact={
         "name": "powerfulyang",
         "email": "i@powerfulyang.com",
@@ -168,21 +169,53 @@ async def cleanup_temp_files():
                 break
 
 
+# ——— 数据模型 ———
+class WordTimestamp(BaseModel):
+    """词级时间戳数据模型"""
+    word: str
+    start: float
+    end: float
+    probability: float
+
+
+class TranscriptionSegment(BaseModel):
+    """转录段落数据模型"""
+    start: float
+    end: float
+    text: str
+    words: List[WordTimestamp]
+
 
 class GenerateSubtitleResponse(BaseModel):
+    """传统SRT响应模型（向后兼容）"""
+    srt_content: str
+
+
+class DetailedTranscriptionResponse(BaseModel):
+    """详细转录响应模型（包含词级时间戳）"""
+    segments: List[TranscriptionSegment]
+    language: str
+    language_probability: float
+    duration: float
+    duration_after_vad: float
+    all_language_probs: Optional[List[List]] = None
     srt_content: str
 
 
 # ——— API 端点 ———
 @app.post(
     "/generate_subtitle",
-    summary="生成SRT字幕",
-    description="上传一个音频或视频文件，此端点将为其生成SRT格式的字幕文件并返回。",
+    summary="生成字幕（支持详细模式）",
+    description="上传音频或视频文件生成字幕。支持传统SRT格式和包含词级时间戳的详细数据格式。",
     tags=["Subtitle Generation"],
-    response_model=GenerateSubtitleResponse,
+    response_model=Dict[str, Any],
 )
 async def generate_subtitle_endpoint(
-        file: UploadFile = File(description="需要生成字幕的音频或视频文件。")
+    file: UploadFile = File(description="需要生成字幕的音频或视频文件。"),
+    detailed: bool = Query(
+        default=False, 
+        description="是否返回包含词级时间戳的详细数据。False=仅返回SRT内容，True=返回完整转录数据。"
+    )
 ):
     api_logger = get_logger("api.generate_subtitle")
  
@@ -193,7 +226,93 @@ async def generate_subtitle_endpoint(
 
     # 记录请求信息
     file_size_display = format_file_size(file.size) if hasattr(file, 'size') and file.size else '未知'
+    mode_desc = "详细模式（含词级时间戳）" if detailed else "标准模式（SRT格式）"
     api_logger.info(f"📥 收到字幕生成请求 - 文件: {file.filename}, "
+                    f"大小: {file_size_display}, "
+                    f"类型: {file.content_type}, "
+                    f"模式: {mode_desc}")
+
+    # 生成UUID作为临时文件名，保留原始文件扩展名
+    file_extension = os.path.splitext(file.filename)[1] if file.filename else ""
+    temp_filename = f"{uuid.uuid4()}{file_extension}"
+    temp_file_path = os.path.join(TEMP_DIR, temp_filename)
+
+    try:
+        # 将上传的文件保存到临时目录
+        api_logger.debug(f"💾 正在保存临时文件: {temp_filename} (原文件: {file.filename})")
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # 验证文件保存成功
+        saved_size = os.path.getsize(temp_file_path)
+        api_logger.debug(f"✅ 临时文件保存成功，大小: {format_file_size(saved_size)}")
+
+        # 根据模式调用相应的处理函数
+        if detailed:
+            # 详细模式：返回包含词级时间戳的完整数据
+            api_logger.info(f"🔄 开始生成详细转录数据: {file.filename}")
+            result = generate_detailed_transcription(temp_file_path)
+            
+            if not result or not result.get("segments"):
+                api_logger.warning(f"⚠️ 生成的详细转录数据为空: {file.filename}")
+                raise HTTPException(status_code=422, detail="未能从音频文件中识别出任何文本内容")
+
+            api_logger.info(f"✅ 详细转录数据生成成功: {file.filename}, 共 {len(result['segments'])} 个段落")
+            return result
+
+        else:
+            # 标准模式：仅返回SRT内容（向后兼容）
+            api_logger.info(f"🔄 开始生成SRT字幕: {file.filename}")
+            srt_content = generate_srt(temp_file_path)
+
+            if not srt_content or not srt_content.strip():
+                api_logger.warning(f"⚠️ 生成的字幕内容为空: {file.filename}")
+                raise HTTPException(status_code=422, detail="未能从音频文件中识别出任何文本内容")
+
+            api_logger.info(f"✅ SRT字幕生成成功: {file.filename}")
+            return {"srt_content": srt_content}
+
+    except HTTPException:
+        # 重新抛出HTTP异常，不记录日志（避免重复）
+        raise
+    except Exception as e:
+        # 捕获所有其他异常，记录详细日志并返回HTTP 500错误
+        api_logger.error(f"❌ 生成字幕时发生错误: {file.filename} - {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"生成字幕时发生错误: {str(e)}")
+
+    finally:
+        # 确保临时文件在请求结束后被删除
+        if os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+                api_logger.debug(f"🗑️ 临时文件已清理: {temp_filename}")
+            except Exception as e:
+                api_logger.error(f"❌ 清理临时文件失败: {temp_filename} - {e}")
+        else:
+            api_logger.debug(f"📝 临时文件不存在，无需清理: {temp_filename}")
+
+
+@app.post(
+    "/generate_detailed_transcription",
+    summary="生成详细转录数据（含词级时间戳）",
+    description="上传音频或视频文件，返回包含词级时间戳的详细转录数据。这是专门的详细模式端点。",
+    tags=["Subtitle Generation"],
+    response_model=DetailedTranscriptionResponse,
+)
+async def generate_detailed_transcription_endpoint(
+    file: UploadFile = File(description="需要生成详细转录数据的音频或视频文件。")
+):
+    """专门的详细转录端点，始终返回包含词级时间戳的完整数据"""
+    api_logger = get_logger("api.generate_detailed_transcription")
+ 
+    # 验证文件
+    if not file or not file.filename:
+        api_logger.error("❌ 接收到无效的文件上传请求")
+        raise HTTPException(status_code=400, detail="未提供有效的文件")
+
+    # 记录请求信息
+    file_size_display = format_file_size(file.size) if hasattr(file, 'size') and file.size else '未知'
+    api_logger.info(f"📥 收到详细转录请求 - 文件: {file.filename}, "
                     f"大小: {file_size_display}, "
                     f"类型: {file.content_type}")
 
@@ -212,26 +331,24 @@ async def generate_subtitle_endpoint(
         saved_size = os.path.getsize(temp_file_path)
         api_logger.debug(f"✅ 临时文件保存成功，大小: {format_file_size(saved_size)}")
 
-        # 调用核心逻辑生成SRT内容
-        api_logger.info(f"🔄 开始生成字幕: {file.filename}")
-        srt_content = generate_srt(temp_file_path)
-
-        if not srt_content or not srt_content.strip():
-            api_logger.warning(f"⚠️ 生成的字幕内容为空: {file.filename}")
+        # 生成详细转录数据
+        api_logger.info(f"🔄 开始生成详细转录数据: {file.filename}")
+        result = generate_detailed_transcription(temp_file_path)
+        
+        if not result or not result.get("segments"):
+            api_logger.warning(f"⚠️ 生成的详细转录数据为空: {file.filename}")
             raise HTTPException(status_code=422, detail="未能从音频文件中识别出任何文本内容")
 
-        # 记录成功信息
-        api_logger.info(f"✅ 字幕生成成功: {file.filename}")
-
-        return GenerateSubtitleResponse(srt_content=srt_content)
+        api_logger.info(f"✅ 详细转录数据生成成功: {file.filename}, 共 {len(result['segments'])} 个段落")
+        return result
 
     except HTTPException:
         # 重新抛出HTTP异常，不记录日志（避免重复）
         raise
     except Exception as e:
         # 捕获所有其他异常，记录详细日志并返回HTTP 500错误
-        api_logger.error(f"❌ 生成字幕时发生错误: {file.filename} - {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"生成字幕时发生错误: {str(e)}")
+        api_logger.error(f"❌ 生成详细转录数据时发生错误: {file.filename} - {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"生成详细转录数据时发生错误: {str(e)}")
 
     finally:
         # 确保临时文件在请求结束后被删除
