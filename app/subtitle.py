@@ -131,6 +131,8 @@ def generate_srt(audio_path: str) -> str:
             audio_path,
             beam_size=5,
             vad_filter=True,
+            initial_prompt="这是一段普通话的音频，请用简体中文转录。",
+            language="zh",
         )
 
         logger.info(f"检测到语言 '{info.language}' (置信度: {info.language_probability:.4f})")
