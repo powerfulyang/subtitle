@@ -3,10 +3,11 @@ import logging
 import os
 import shutil
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
     
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from app.logger_config import get_logger
@@ -182,7 +183,8 @@ class GenerateSubtitleResponse(BaseModel):
     response_model=GenerateSubtitleResponse,
 )
 async def generate_subtitle_endpoint(
-        file: UploadFile = File(description="需要生成字幕的音频或视频文件。")
+        file: UploadFile = File(description="需要生成字幕的音频或视频文件。"),
+        language: str = Form(default="zh", description="语言代码，如 'zh' 或 'en'")
 ):
     api_logger = get_logger("api.generate_subtitle")
  
@@ -197,11 +199,14 @@ async def generate_subtitle_endpoint(
                     f"大小: {file_size_display}, "
                     f"类型: {file.content_type}")
 
-    temp_file_path = os.path.join(TEMP_DIR, file.filename)
+    # 生成UUID作为临时文件名，保留原始文件扩展名
+    file_extension = os.path.splitext(file.filename)[1] if file.filename else ""
+    temp_filename = f"{uuid.uuid4()}{file_extension}"
+    temp_file_path = os.path.join(TEMP_DIR, temp_filename)
 
     try:
         # 将上传的文件保存到临时目录
-        api_logger.debug(f"💾 正在保存临时文件: {temp_file_path}")
+        api_logger.debug(f"💾 正在保存临时文件: {temp_filename} (原文件: {file.filename})")
         with open(temp_file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
@@ -211,7 +216,7 @@ async def generate_subtitle_endpoint(
 
         # 调用核心逻辑生成SRT内容
         api_logger.info(f"🔄 开始生成字幕: {file.filename}")
-        result = generate_srt(temp_file_path)
+        result = generate_srt(temp_file_path, language)
 
         if not result["srt_content"] or not result["srt_content"].strip():
             api_logger.warning(f"⚠️ 生成的字幕内容为空: {file.filename}")
@@ -238,11 +243,11 @@ async def generate_subtitle_endpoint(
         if os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
-                api_logger.debug(f"🗑️ 临时文件已清理: {temp_file_path}")
+                api_logger.debug(f"🗑️ 临时文件已清理: {temp_filename}")
             except Exception as e:
-                api_logger.error(f"❌ 清理临时文件失败: {temp_file_path} - {e}")
+                api_logger.error(f"❌ 清理临时文件失败: {temp_filename} - {e}")
         else:
-            api_logger.debug(f"📝 临时文件不存在，无需清理: {temp_file_path}")
+            api_logger.debug(f"📝 临时文件不存在，无需清理: {temp_filename}")
 
 
 # ——— 自定义日志格式 ———

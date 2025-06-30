@@ -27,7 +27,7 @@ def get_device() -> str:
         logger.info("CUDA is not available, using CPU for inference.")
     return device
 
-model_size_or_path = "large-v3"
+model_size_or_path = "large-v2"
 
 model_instance = None
 align_model_instance = None
@@ -132,7 +132,7 @@ def convert_to_srt_content(segments) -> str:
     return srt_content
 
 
-def generate_srt(audio_path: str, enable_alignment: bool = True) -> str:
+def generate_srt(audio_path: str, language_code: str, enable_alignment: bool = True) -> str:
     """
     为给定的音频或视频文件生成SRT字幕内容。
 
@@ -158,7 +158,11 @@ def generate_srt(audio_path: str, enable_alignment: bool = True) -> str:
         
         # 执行转录，使用批量推理提高速度
         batch_size = 16 if device == "cuda" else 4
-        result = model.transcribe(audio, batch_size=batch_size)
+        result = model.transcribe(
+            audio, 
+            batch_size=batch_size, 
+            language=language_code,
+        )
 
         logger.info(f"基础转录完成: {result}")
 
@@ -167,14 +171,14 @@ def generate_srt(audio_path: str, enable_alignment: bool = True) -> str:
         # 阶段2: 词级时间戳对齐（可选，默认启用）
         if enable_alignment:
             try:
-                align_model, metadata = get_align_model(language_code=result["language"])
+                align_model, metadata = get_align_model(language_code=language_code)
                 result = whisperx.align(
                     result["segments"], 
                     align_model, 
                     metadata, 
                     audio, 
                     device, 
-                    return_char_alignments=False
+                    return_char_alignments=True
                 )
                 logger.info("词级时间戳对齐完成")
                 
